@@ -25,6 +25,17 @@ router.post("/initial", (req, res) => {
   switch (req.body.Digits) {
     // Order
     case "1": {
+      const response = new twilio.twiml.VoiceResponse();
+      const gather = response.gather({
+        action: "/ivr/order",
+        method: "POST",
+        input: ["dtmf", "speech"],
+        numDigits: 1,
+      });
+      gather.say(
+        "You selected to place an order. Press 1 list to list out all the products. or say the name of the product to add it to the cart"
+      );
+      res.send(response.toString());
       break;
     }
     // Customer service
@@ -44,6 +55,14 @@ router.post("/initial", (req, res) => {
       res.send(response.toString());
       break;
     }
+  }
+});
+
+router.post("/order", (req, res) => {
+  const { Digits, SpeechResult } = req.body;
+
+  if (Digits != null) {
+    
   }
 });
 

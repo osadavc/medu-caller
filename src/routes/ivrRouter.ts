@@ -20,9 +20,6 @@ router.post("/welcome", (_, res) => {
 });
 
 router.post("/initial", (req, res) => {
-  console.log(req.body);
-  console.log(req.body.Digits);
-
   switch (req.body.Digits) {
     // Order
     case "1": {
@@ -34,7 +31,7 @@ router.post("/initial", (req, res) => {
         numDigits: 1,
       });
       gather.say(
-        "You selected to place an order. Press 1 list to list out all the products. or say the name of the product to buy it"
+        "You selected to place an order. Press 1 to list out all the products. or say the name of the product to buy it"
       );
       res.send(response.toString());
       break;
@@ -61,24 +58,29 @@ router.post("/initial", (req, res) => {
 
 router.post("/order", async (req, res) => {
   const { Digits: digits, SpeechResult: speechResult } = req.body;
+  console.log("Speech Result 👉🏻", speechResult);
 
   if (digits != null) {
     const products = await medusa.products.list({
       limit: config.PRODUCT_LIST_LIMIT,
     });
+
     const response = new twilio.twiml.VoiceResponse();
+    response.say("Here are the products we have currently available.");
 
-    const say = response.say("Here are the products we have available");
+    const availableProductList = products.products
+      .map((product) => ({
+        id: product.id,
+        name: product.title,
+        price:
+          product.variants[0].prices.find((item) => item.currency_code == "usd")
+            ?.amount! / 100,
+        isAvailable: product.variants[0].inventory_quantity > 0,
+      }))
+      .filter((item) => item.isAvailable);
 
-    products.products.forEach((item) => {
-      say.p(
-        `${item.title} for ${
-          item.variants[0].prices.find((item) => item.currency_code == "usd")
-            ?.amount! / 100
-        } dollars.`
-      );
-
-      say.break_();
+    availableProductList.forEach((item) => {
+      response.say(`${item.name} for ${item.price} dollars.`);
     });
 
     response
@@ -105,6 +107,21 @@ router.post("/order", async (req, res) => {
       response.say(
         `You selected ${product.hits}. We will place your order now`
       );
+
+      res.send(response.toString());
+    } else {
+      const response = new twilio.twiml.VoiceResponse();
+
+      response
+        .gather({
+          action: "/ivr/order",
+          method: "POST",
+          input: ["dtmf", "speech"],
+          numDigits: 1,
+        })
+        .say(
+          "Press 1 to list out the products again. or say the name of the product to buy it"
+        );
 
       res.send(response.toString());
     }

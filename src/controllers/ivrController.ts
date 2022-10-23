@@ -5,6 +5,7 @@ import * as config from "../config";
 import medusa from "../lib/medusa";
 import prisma from "../lib/prisma";
 import * as twilioClient from "../lib/twilio";
+import addToCart from "../utils/addToCart";
 
 export const greetUser: Handler = (_, res) => {
   const response = new twilio.twiml.VoiceResponse();
@@ -32,7 +33,11 @@ export const initialInteraction: Handler = async (req, res) => {
         },
       });
 
-      if (!userDetails || !userDetails.shippingAddress) {
+      if (
+        !userDetails ||
+        !userDetails.shippingAddress ||
+        !userDetails.emailAddress
+      ) {
         response.say(
           "You have not provided your shipping address yet. This call will be automatically hanged up. and you will receive a text message with the information on how to provide your shipping address."
         );
@@ -40,10 +45,17 @@ export const initialInteraction: Handler = async (req, res) => {
 
         console.log(req.body);
 
-        await twilioClient.sendSMS(
-          req.body.From,
-          "Please reply to this message with your shipping address."
-        );
+        if (!userDetails?.shippingAddress) {
+          await twilioClient.sendSMS(
+            req.body.From,
+            "Please reply to this message with your shipping address."
+          );
+        } else {
+          await twilioClient.sendSMS(
+            req.body.From,
+            "Please reply to this message with your email address."
+          );
+        }
         if (userDetails) {
           await prisma.caller.update({
             where: {
@@ -148,46 +160,9 @@ export const orderProduct: Handler = async (req, res) => {
     if (userDetails?.productName) {
       const response = new twilio.twiml.VoiceResponse();
 
-      const {
-        products: { [0]: product },
-      } = await medusa.products.list({
-        q: userDetails.productName.replace(/[^a-zA-Z0-9 ]/g, ""),
-      });
-
-      response.say(
-        `You selected ${product.title}. We will place your order now`
-      );
-      const {
-        cart: { id },
-      } = await medusa.carts.create({
-        items: [
-          {
-            variant_id: product.variants[0].id,
-            quantity: 1,
-          },
-        ],
-      });
-      const shippingOptions = await medusa.shippingOptions.list();
-      await medusa.carts.addShippingMethod(id, {
-        option_id: shippingOptions.shipping_options[0].id,
-        data: {
-          address: userDetails?.shippingAddress ?? "",
-          phoneNumber: req.body.From,
-        },
-      });
-
-      await prisma.caller.update({
-        where: {
-          phoneNumber: req.body.From,
-        },
-        data: {
-          latestCartId: id,
-          productName: null,
-        },
-      });
-
+      await addToCart(userDetails, response, req.body.From);
+      console.log("here");
       response.redirect("/ivr/pay");
-
       res.send(response.toString());
     }
   } else if (speechResult.length > 0) {
@@ -205,39 +180,9 @@ export const orderProduct: Handler = async (req, res) => {
         },
       });
 
-      response.say(
-        `You selected ${searchResult.title}. We will place your order now`
-      );
-      const {
-        cart: { id },
-      } = await medusa.carts.create({
-        items: [
-          {
-            variant_id: searchResult.variants[0].id,
-            quantity: 1,
-          },
-        ],
-      });
-      const shippingOptions = await medusa.shippingOptions.list();
-      await medusa.carts.addShippingMethod(id, {
-        option_id: shippingOptions.shipping_options[0].id,
-        data: {
-          address: userDetails?.shippingAddress ?? "",
-          phoneNumber: req.body.From,
-        },
-      });
-
-      await prisma.caller.update({
-        where: {
-          phoneNumber: req.body.From,
-        },
-        data: {
-          latestCartId: id,
-        },
-      });
+      addToCart(userDetails, response, req.body.From);
 
       response.redirect("/ivr/pay");
-
       res.send(response.toString());
     } else {
       const response = new twilio.twiml.VoiceResponse();
@@ -313,7 +258,9 @@ export const paymentComplete: Handler = async (req, res) => {
     case "success": {
       response.say("Payment successful. Thank you for your order");
       try {
-        await medusa.carts.createPaymentSessions(userDetails?.latestCartId!);
+        await medusa.carts.createPaymentSessions(userDetails?.latestCartId!, {
+          "Idempotency-Key": "create_payment_session_key",
+        });
 
         const data = await medusa.carts.complete(userDetails?.latestCartId!);
       } catch (error) {

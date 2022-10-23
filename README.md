@@ -14,7 +14,7 @@ Medu caller is a simple way to allow people to order from a Medusa store via a c
 
 ### Preview
 
-Here is a preview of the the call function in action. I am using textnow here to call the twilio number toll-free but you could use your mobile phone to call.
+Here is a preview of the the call function in action. I am using textnow here to call the twilio number toll-free but you could use your mobile phone to call. (watch with sound)
 
 https://user-images.githubusercontent.com/70420788/197410411-ed5604b9-ce80-4aeb-b92b-6188c130d4a4.mp4
 

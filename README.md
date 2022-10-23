@@ -1,4 +1,4 @@
-# Medu Caller - Order From Medusa Store via a Call
+# Medu Caller - Order From A Medusa Store via a Call
 
 ![Medu Caller](assets/banner.png)
 

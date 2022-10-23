@@ -6,8 +6,10 @@ import medusa from "../lib/medusa";
 import prisma from "../lib/prisma";
 import * as twilioClient from "../lib/twilio";
 import addToCart from "../utils/addToCart";
+import getCustomerNumber from "../utils/getCustomerNumber";
 
 export const greetUser: Handler = (_, res) => {
+  console.log(_.body);
   const response = new twilio.twiml.VoiceResponse();
   const gather = response.gather({
     action: "/ivr/initial",
@@ -29,7 +31,7 @@ export const initialInteraction: Handler = async (req, res) => {
 
       const userDetails = await prisma.caller.findUnique({
         where: {
-          phoneNumber: req.body.From,
+          phoneNumber: getCustomerNumber(req.body),
         },
       });
 
@@ -47,19 +49,19 @@ export const initialInteraction: Handler = async (req, res) => {
 
         if (!userDetails?.shippingAddress) {
           await twilioClient.sendSMS(
-            req.body.From,
+            getCustomerNumber(req.body),
             "Please reply to this message with your shipping address."
           );
         } else {
           await twilioClient.sendSMS(
-            req.body.From,
+            getCustomerNumber(req.body),
             "Please reply to this message with your email address."
           );
         }
         if (userDetails) {
           await prisma.caller.update({
             where: {
-              phoneNumber: req.body.From,
+              phoneNumber: getCustomerNumber(req.body),
             },
             data: {
               shippingAddressSMSSent: true,
@@ -68,7 +70,7 @@ export const initialInteraction: Handler = async (req, res) => {
         } else {
           await prisma.caller.create({
             data: {
-              phoneNumber: req.body.From,
+              phoneNumber: getCustomerNumber(req.body),
               shippingAddressSMSSent: true,
             },
           });
@@ -78,7 +80,6 @@ export const initialInteraction: Handler = async (req, res) => {
       const gather = response.gather({
         action: "/ivr/order",
         method: "POST",
-        input: ["dtmf", "speech"],
         numDigits: 1,
       });
 
@@ -111,7 +112,6 @@ export const initialInteraction: Handler = async (req, res) => {
 
 export const orderProduct: Handler = async (req, res) => {
   const { Digits: digits, SpeechResult: speechResult } = req.body;
-  console.log("Speech Result 👉🏻", speechResult);
   console.log(digits);
 
   if (digits == "1") {
@@ -141,72 +141,46 @@ export const orderProduct: Handler = async (req, res) => {
       .gather({
         action: "/ivr/order",
         method: "POST",
-        input: ["dtmf", "speech"],
         numDigits: 1,
-        timeout: 30,
+        timeout: 100,
       })
       .say(
-        "Press 1 to list out the products again. Send the product name as a text message while in the call and press 2. or say the name of the product to buy it"
+        "Press 1 to list out the products again. or send the product name as a text message while in the call and press 2"
       );
 
     res.send(response.toString());
   } else if (digits == "2") {
+    console.log(req.body);
     const userDetails = await prisma.caller.findUnique({
       where: {
-        phoneNumber: req.body.From,
+        phoneNumber: getCustomerNumber(req.body),
       },
     });
 
+    console.log(userDetails);
+
     if (userDetails?.productName) {
       const response = new twilio.twiml.VoiceResponse();
-
-      await addToCart(userDetails, response, req.body.From);
+      console.log("hey");
+      await addToCart(userDetails, response, getCustomerNumber(req.body));
       console.log("here");
       response.redirect("/ivr/pay");
       res.send(response.toString());
     }
-  } else if (speechResult.length > 0) {
-    const {
-      products: { [0]: searchResult },
-    } = await medusa.products.list({
-      q: speechResult.replace(/[^a-zA-Z0-9 ]/g, ""),
-    });
+  } else {
+    const response = new twilio.twiml.VoiceResponse();
 
-    if (!!searchResult?.id) {
-      const response = new twilio.twiml.VoiceResponse();
-      const userDetails = await prisma.caller.findUnique({
-        where: {
-          phoneNumber: req.body.From,
-        },
-      });
+    response.say("Returning to the main menu");
+    response.redirect("/ivr/welcome");
 
-      addToCart(userDetails, response, req.body.From);
-
-      response.redirect("/ivr/pay");
-      res.send(response.toString());
-    } else {
-      const response = new twilio.twiml.VoiceResponse();
-
-      response
-        .gather({
-          action: "/ivr/order",
-          method: "POST",
-          input: ["dtmf", "speech"],
-          numDigits: 1,
-        })
-        .say(
-          "Press 1 to list out the products again. Send the product name as a text message while in the call and press 2. or say the name of the product to buy it"
-        );
-
-      res.send(response.toString());
-    }
+    res.send(response.toString());
   }
 };
 
 export const pay: Handler = async (req, res) => {
   const userDetails = await prisma.caller.findUnique({
     where: {
-      phoneNumber: req.body.From,
+      phoneNumber: getCustomerNumber(req.body),
     },
   });
 
@@ -237,7 +211,7 @@ export const pay: Handler = async (req, res) => {
 export const paymentComplete: Handler = async (req, res) => {
   const userDetails = await prisma.caller.findUnique({
     where: {
-      phoneNumber: req.body.From,
+      phoneNumber: getCustomerNumber(req.body),
     },
   });
 
@@ -262,18 +236,21 @@ export const paymentComplete: Handler = async (req, res) => {
           "Idempotency-Key": "create_payment_session_key",
         });
 
-        const data = await medusa.carts.complete(userDetails?.latestCartId!);
+        const { data: orderData } = await medusa.carts.complete(
+          userDetails?.latestCartId!
+        );
+        await medusa.admin.orders.capturePayment(orderData?.id!);
       } catch (error) {
         console.log(error);
       }
-      // await prisma.caller.update({
-      //   where: {
-      //     phoneNumber: req.body.From,
-      //   },
-      //   data: {
-      //     latestCartId: null,
-      //   },
-      // });
+      await prisma.caller.update({
+        where: {
+          phoneNumber: getCustomerNumber(req.body),
+        },
+        data: {
+          latestCartId: null,
+        },
+      });
       break;
     }
     case "payment-connector-error": {

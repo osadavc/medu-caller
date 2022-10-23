@@ -37,12 +37,12 @@ router.post("/", async (req, res) => {
     const gather = response.gather({
       action: `${config.CALLER_URL}/ivr/order`,
       method: "POST",
-      input: ["dtmf", "speech"],
+      timeout: 99,
       numDigits: 1,
     });
 
     gather.say(
-      "Your shipping address is configured. Press 1 to list out all the products. or say the name of the product to buy it"
+      "Your shipping address is configured. Press 1 to list out all the products. or send the product name as a text message while in the call and press 2"
     );
     console.log(response.toString());
     await setTimeoutAsync(1000);
@@ -84,8 +84,6 @@ router.post("/", async (req, res) => {
         productName: req.body.Body,
       },
     });
-  } else {
-    res.send();
   }
 
   res.send();

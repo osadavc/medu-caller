@@ -13,6 +13,8 @@ const addToCart = async (
     q: userDetails?.productName?.replace(/[^a-zA-Z0-9 ]/g, ""),
   });
 
+  console.log("product list");
+
   response.say(`You selected ${product.title}. We will place your order now`);
   const {
     regions: {
@@ -38,6 +40,8 @@ const addToCart = async (
     region_id: regionId,
   });
 
+  console.log("cart created");
+
   const shippingOptions = await medusa.shippingOptions.list();
 
   const address = {
@@ -59,6 +63,8 @@ const addToCart = async (
     shipping_address: address,
   });
 
+  console.log("address updated");
+
   await medusa.carts.addShippingMethod(cartId, {
     option_id: shippingOptions.shipping_options[0].id,
     data: {
@@ -66,6 +72,8 @@ const addToCart = async (
       phoneNumber: from,
     },
   });
+
+  console.log("shipping method added");
 
   await prisma.caller.update({
     where: {
@@ -76,6 +84,10 @@ const addToCart = async (
       productName: null,
     },
   });
+
+  console.log("caller updated");
+
+  return;
 };
 
 export default addToCart;

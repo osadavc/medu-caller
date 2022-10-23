@@ -4,6 +4,7 @@ import * as config from "../config";
 const medusa = new Medusa({
   baseUrl: config.MEDUSA_BACKEND_URL,
   maxRetries: 3,
+  apiKey: process.env.MEDUSA_ADMIN_TOKEN,
 });
 
 export default medusa;

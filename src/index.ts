@@ -1,13 +1,14 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import twilio from "twilio";
 import morgan from "morgan";
-import dotenv from "dotenv";
 
 import ivrRouter from "./routes/ivrRouter";
 import smsRouter from "./routes/smsRouter";
 
 const app = express();
-dotenv.config();
 
 app.use(morgan("dev"));
 app.use(express.json());

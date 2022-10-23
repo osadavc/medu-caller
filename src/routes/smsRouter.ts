@@ -48,7 +48,7 @@ router.post("/", async (req, res) => {
     await setTimeoutAsync(1000);
 
     await twilioClient.default.calls.create({
-      from: config.twilioPhoneNumber,
+      from: config.twilioPhoneNumber!,
       to: req.body.From,
       twiml: response.toString(),
     });

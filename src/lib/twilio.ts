@@ -1,14 +1,15 @@
 import twilioClient from "twilio";
+import * as config from "../config";
 
 const twilio = twilioClient(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_ACCOUNT_AUTH_TOKEN
+  config.twilioAccountSID,
+  config.twilioAccountAuthToken
 );
 
 export const sendSMS = async (to: string, body: string) => {
   return await twilio.messages.create({
     body,
-    from: process.env.TWILIO_PHONE_NUMBER,
+    from: config.twilioPhoneNumber,
     to,
   });
 };

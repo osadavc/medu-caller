@@ -44,11 +44,11 @@ router.post("/", async (req, res) => {
     gather.say(
       "Your shipping address is configured. Press 1 to list out all the products. or send the product name as a text message while in the call and press 2"
     );
-   
+
     await setTimeoutAsync(1000);
 
     await twilioClient.default.calls.create({
-      from: process.env.TWILIO_PHONE_NUMBER!,
+      from: config.twilioPhoneNumber,
       to: req.body.From,
       twiml: response.toString(),
     });

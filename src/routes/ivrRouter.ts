@@ -1,7 +1,10 @@
 import { Router } from "express";
 import twilio from "twilio";
 import * as config from "../config";
+
 import medusa from "../lib/medusa";
+import prisma from "../lib/prisma";
+import * as twilioClient from "../lib/twilio";
 
 const router = Router();
 
@@ -19,20 +22,60 @@ router.post("/welcome", (_, res) => {
   res.send(response.toString());
 });
 
-router.post("/initial", (req, res) => {
+router.post("/initial", async (req, res) => {
   switch (req.body.Digits) {
     // Order
     case "1": {
       const response = new twilio.twiml.VoiceResponse();
+
+      const userDetails = await prisma.caller.findUnique({
+        where: {
+          phoneNumber: req.body.From,
+        },
+      });
+
+      if (!userDetails || !userDetails.shippingAddress) {
+        response.say(
+          "You have not provided your shipping address yet. This call will be automatically hanged up. and you will receive a text message with the information on how to provide your shipping address."
+        );
+        response.hangup();
+
+        console.log(req.body);
+
+        await twilioClient.sendSMS(
+          req.body.From,
+          "Please reply to this message with your shipping address."
+        );
+        if (userDetails) {
+          await prisma.caller.update({
+            where: {
+              phoneNumber: req.body.From,
+            },
+            data: {
+              shippingAddressSMSSent: true,
+            },
+          });
+        } else {
+          await prisma.caller.create({
+            data: {
+              phoneNumber: req.body.From,
+              shippingAddressSMSSent: true,
+            },
+          });
+        }
+      }
+
       const gather = response.gather({
         action: "/ivr/order",
         method: "POST",
         input: ["dtmf", "speech"],
         numDigits: 1,
       });
+
       gather.say(
         "You selected to place an order. Press 1 to list out all the products. or say the name of the product to buy it"
       );
+
       res.send(response.toString());
       break;
     }
@@ -96,17 +139,53 @@ router.post("/order", async (req, res) => {
 
     res.send(response.toString());
   } else if (speechResult.length > 0) {
-    const product = await medusa.products.search({
-      q: speechResult,
+    const {
+      products: { [0]: searchResult },
+    } = await medusa.products.list({
+      q: speechResult.replace(/[^a-zA-Z0-9 ]/g, ""),
     });
-    console.log(product);
+    console.log(speechResult, " : ", searchResult);
 
-    if (product.hits.length > 0) {
+    if (!!searchResult.id) {
       const response = new twilio.twiml.VoiceResponse();
+      const userDetails = await prisma.caller.findUnique({
+        where: {
+          phoneNumber: req.body.From,
+        },
+      });
 
       response.say(
-        `You selected ${product.hits}. We will place your order now`
+        `You selected ${searchResult.title}. We will place your order now`
       );
+      const {
+        cart: { id },
+      } = await medusa.carts.create({
+        items: [
+          {
+            variant_id: searchResult.variants[0].id,
+            quantity: 1,
+          },
+        ],
+      });
+      const shippingOptions = await medusa.shippingOptions.list();
+      await medusa.carts.addShippingMethod(id, {
+        option_id: shippingOptions.shipping_options[0].id,
+        data: {
+          address: userDetails?.shippingAddress ?? "",
+          phoneNumber: req.body.From,
+        },
+      });
+
+      await prisma.caller.update({
+        where: {
+          phoneNumber: req.body.From,
+        },
+        data: {
+          latestCartId: id,
+        },
+      });
+
+      response.redirect("/ivr/pay");
 
       res.send(response.toString());
     } else {
@@ -126,6 +205,85 @@ router.post("/order", async (req, res) => {
       res.send(response.toString());
     }
   }
+});
+
+router.post("/pay", async (req, res) => {
+  const userDetails = await prisma.caller.findUnique({
+    where: {
+      phoneNumber: req.body.From,
+    },
+  });
+
+  const cartDetails = await medusa.carts.retrieve(userDetails?.latestCartId!);
+
+  if (!userDetails?.latestCartId || cartDetails.cart.completed_at != null) {
+    const response = new twilio.twiml.VoiceResponse();
+    response.say("You have no cart to pay for. Returning to the main menu");
+    response.redirect("/ivr/welcome");
+
+    res.send(response.toString());
+    return;
+  }
+
+  const response = new twilio.twiml.VoiceResponse();
+  response.say("You're now ready to pay");
+  console.log(((cartDetails.cart.total ?? 0) / 100).toString());
+  // Twilio Pay
+  response.pay({
+    chargeAmount: ((cartDetails.cart.total ?? 0) / 100).toString(),
+    action: "/ivr/payment-completed",
+    paymentConnector: "Stripe_Connector",
+  });
+
+  res.send(response.toString());
+});
+
+router.post("/payment-completed", async (req, res) => {
+  const userDetails = await prisma.caller.findUnique({
+    where: {
+      phoneNumber: req.body.From,
+    },
+  });
+
+  const cartDetails = await medusa.carts.retrieve(userDetails?.latestCartId!);
+
+  if (!userDetails?.latestCartId || cartDetails.cart.completed_at != null) {
+    const response = new twilio.twiml.VoiceResponse();
+    response.say("You have no cart to pay for. Returning to the main menu");
+    response.redirect("/ivr/welcome");
+
+    res.send(response.toString());
+    return;
+  }
+
+  const response = new twilio.twiml.VoiceResponse();
+
+  switch (req.body.Result) {
+    case "success": {
+      response.say("Payment successful. Thank you for your order");
+      await medusa.carts.complete(userDetails?.latestCartId!);
+      await prisma.caller.update({
+        where: {
+          phoneNumber: req.body.From,
+        },
+        data: {
+          latestCartId: null,
+        },
+      });
+      break;
+    }
+    case "payment-connector-error": {
+      response.say("Payment failed. Please try again");
+      break;
+    }
+    default: {
+      response.say("Payment failed. Please try again");
+    }
+  }
+
+  response.hangup();
+
+  res.send(response.toString());
 });
 
 export default router;

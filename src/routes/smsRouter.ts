@@ -44,7 +44,7 @@ router.post("/", async (req, res) => {
     gather.say(
       "Your shipping address is configured. Press 1 to list out all the products. or send the product name as a text message while in the call and press 2"
     );
-    console.log(response.toString());
+   
     await setTimeoutAsync(1000);
 
     await twilioClient.default.calls.create({

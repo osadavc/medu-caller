@@ -9,7 +9,6 @@ import addToCart from "../utils/addToCart";
 import getCustomerNumber from "../utils/getCustomerNumber";
 
 export const greetUser: Handler = (_, res) => {
-  console.log(_.body);
   const response = new twilio.twiml.VoiceResponse();
   const gather = response.gather({
     action: "/ivr/initial",
@@ -44,8 +43,6 @@ export const initialInteraction: Handler = async (req, res) => {
           "You have not provided your shipping address yet. This call will be automatically hanged up. and you will receive a text message with the information on how to provide your shipping address."
         );
         response.hangup();
-
-        console.log(req.body);
 
         if (!userDetails?.shippingAddress) {
           await twilioClient.sendSMS(
@@ -112,7 +109,6 @@ export const initialInteraction: Handler = async (req, res) => {
 
 export const orderProduct: Handler = async (req, res) => {
   const { Digits: digits, SpeechResult: speechResult } = req.body;
-  console.log(digits);
 
   if (digits == "1") {
     const products = await medusa.products.list({
@@ -150,20 +146,17 @@ export const orderProduct: Handler = async (req, res) => {
 
     res.send(response.toString());
   } else if (digits == "2") {
-    console.log(req.body);
     const userDetails = await prisma.caller.findUnique({
       where: {
         phoneNumber: getCustomerNumber(req.body),
       },
     });
 
-    console.log(userDetails);
-
     if (userDetails?.productName) {
       const response = new twilio.twiml.VoiceResponse();
-      console.log("hey");
+
       await addToCart(userDetails, response, getCustomerNumber(req.body));
-      console.log("here");
+
       response.redirect("/ivr/pay");
       res.send(response.toString());
     }
@@ -197,8 +190,8 @@ export const pay: Handler = async (req, res) => {
 
   const response = new twilio.twiml.VoiceResponse();
   response.say("You're now ready to pay");
-  console.log(((cartDetails.cart.total ?? 0) / 100).toString());
-  // Twilio Pay
+
+  // Twilio X Stripe Pay
   response.pay({
     chargeAmount: ((cartDetails.cart.total ?? 0) / 100).toString(),
     action: "/ivr/payment-completed",
@@ -241,7 +234,7 @@ export const paymentComplete: Handler = async (req, res) => {
         );
         await medusa.admin.orders.capturePayment(orderData?.id!);
       } catch (error) {
-        console.log(error);
+        error;
       }
       await prisma.caller.update({
         where: {

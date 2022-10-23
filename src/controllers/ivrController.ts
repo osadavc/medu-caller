@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Handler } from "express";
 import twilio from "twilio";
 import * as config from "../config";
 
@@ -6,7 +6,7 @@ import medusa from "../lib/medusa";
 import prisma from "../lib/prisma";
 import * as twilioClient from "../lib/twilio";
 
-export const greetUser = (_, res) => {
+export const greetUser: Handler = (_, res) => {
   const response = new twilio.twiml.VoiceResponse();
   const gather = response.gather({
     action: "/ivr/initial",
@@ -20,7 +20,7 @@ export const greetUser = (_, res) => {
   res.send(response.toString());
 };
 
-export const initialInteraction = async (req, res) => {
+export const initialInteraction: Handler = async (req, res) => {
   switch (req.body.Digits) {
     // Order
     case "1": {
@@ -97,9 +97,10 @@ export const initialInteraction = async (req, res) => {
   }
 };
 
-export const orderProduct = async (req, res) => {
+export const orderProduct: Handler = async (req, res) => {
   const { Digits: digits, SpeechResult: speechResult } = req.body;
   console.log("Speech Result 👉🏻", speechResult);
+  console.log(digits);
 
   if (digits == "1") {
     const products = await medusa.products.list({
@@ -130,13 +131,65 @@ export const orderProduct = async (req, res) => {
         method: "POST",
         input: ["dtmf", "speech"],
         numDigits: 1,
+        timeout: 30,
       })
       .say(
-        "Press 1 to list out the products again. Send the product name as a text message while in the call and press #. or say the name of the product to buy it"
+        "Press 1 to list out the products again. Send the product name as a text message while in the call and press 2. or say the name of the product to buy it"
       );
 
     res.send(response.toString());
-  } else if (digits == "#") {
+  } else if (digits == "2") {
+    const userDetails = await prisma.caller.findUnique({
+      where: {
+        phoneNumber: req.body.From,
+      },
+    });
+
+    if (userDetails?.productName) {
+      const response = new twilio.twiml.VoiceResponse();
+
+      const {
+        products: { [0]: product },
+      } = await medusa.products.list({
+        q: userDetails.productName.replace(/[^a-zA-Z0-9 ]/g, ""),
+      });
+
+      response.say(
+        `You selected ${product.title}. We will place your order now`
+      );
+      const {
+        cart: { id },
+      } = await medusa.carts.create({
+        items: [
+          {
+            variant_id: product.variants[0].id,
+            quantity: 1,
+          },
+        ],
+      });
+      const shippingOptions = await medusa.shippingOptions.list();
+      await medusa.carts.addShippingMethod(id, {
+        option_id: shippingOptions.shipping_options[0].id,
+        data: {
+          address: userDetails?.shippingAddress ?? "",
+          phoneNumber: req.body.From,
+        },
+      });
+
+      await prisma.caller.update({
+        where: {
+          phoneNumber: req.body.From,
+        },
+        data: {
+          latestCartId: id,
+          productName: null,
+        },
+      });
+
+      response.redirect("/ivr/pay");
+
+      res.send(response.toString());
+    }
   } else if (speechResult.length > 0) {
     const {
       products: { [0]: searchResult },
@@ -197,7 +250,7 @@ export const orderProduct = async (req, res) => {
           numDigits: 1,
         })
         .say(
-          "Press 1 to list out the products again. Send the product name as a text message while in the call and press #. or say the name of the product to buy it"
+          "Press 1 to list out the products again. Send the product name as a text message while in the call and press 2. or say the name of the product to buy it"
         );
 
       res.send(response.toString());
@@ -205,7 +258,7 @@ export const orderProduct = async (req, res) => {
   }
 };
 
-export const pay = async (req, res) => {
+export const pay: Handler = async (req, res) => {
   const userDetails = await prisma.caller.findUnique({
     where: {
       phoneNumber: req.body.From,
@@ -236,7 +289,7 @@ export const pay = async (req, res) => {
   res.send(response.toString());
 };
 
-export const paymentComplete = async (req, res) => {
+export const paymentComplete: Handler = async (req, res) => {
   const userDetails = await prisma.caller.findUnique({
     where: {
       phoneNumber: req.body.From,
@@ -259,15 +312,21 @@ export const paymentComplete = async (req, res) => {
   switch (req.body.Result) {
     case "success": {
       response.say("Payment successful. Thank you for your order");
-      await medusa.carts.complete(userDetails?.latestCartId!);
-      await prisma.caller.update({
-        where: {
-          phoneNumber: req.body.From,
-        },
-        data: {
-          latestCartId: null,
-        },
-      });
+      try {
+        await medusa.carts.createPaymentSessions(userDetails?.latestCartId!);
+
+        const data = await medusa.carts.complete(userDetails?.latestCartId!);
+      } catch (error) {
+        console.log(error);
+      }
+      // await prisma.caller.update({
+      //   where: {
+      //     phoneNumber: req.body.From,
+      //   },
+      //   data: {
+      //     latestCartId: null,
+      //   },
+      // });
       break;
     }
     case "payment-connector-error": {

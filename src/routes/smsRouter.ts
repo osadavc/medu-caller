@@ -49,6 +49,15 @@ router.post("/", async (req, res) => {
         twiml: response.toString(),
       });
     }, 1000);
+  } else if (caller && !caller.productName) {
+    await prisma.caller.update({
+      where: {
+        phoneNumber: req.body.From,
+      },
+      data: {
+        productName: req.body.Body,
+      },
+    });
   }
 
   res.send();

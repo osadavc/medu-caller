@@ -16,4 +16,5 @@ model Caller {
   shippingAddress        String?
   shippingAddressSMSSent Boolean @default(false)
   latestCartId           String?
+  productName            String?
 }
